@@ -2,12 +2,19 @@ name: APK derle
 
 on:
   push:
+    paths-ignore:
+      - "uygulama.py"
+      - "sayfa.html"
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [34, 33]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +35,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer "cython==0.29.36" virtualenv setuptools
 
+      - name: Hedef surumu ayarla
+        run: sed -i "s/^android.api = .*/android.api = ${{ matrix.api }}/" buildozer.spec
+
+      - name: python-for-android'i hazirla ve yamala
+        run: python yama.py
+
       - name: APK derle
         run: buildozer -v android debug
 
       - name: APK dosyasini yukle
         uses: actions/upload-artifact@v4
         with:
-          name: TikTok-Indirici-APK
+          name: TikTok-Indirici-APK-hedef${{ matrix.api }}
           path: bin/*.apk
