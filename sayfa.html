@@ -57,7 +57,8 @@ input[type=range]{accent-color:var(--ac);width:120px;vertical-align:middle}
 <div class="cubukkap"><div id="cubuk"></div></div>
 <div id="dosya"></div>
 <div id="mesaj"></div>
-<div class="satir" id="izinkutu" style="display:none"><button class="ana" id="izin" style="flex:1">Depolama iznini ver</button></div>
+<div id="tani" style="color:var(--soluk);font-size:11px;word-break:break-word;margin-top:8px"></div>
+<div class="satir" id="izinkutu" style="display:none"><button class="ana" id="izin" style="flex:1">Galeri için izin ver (isteğe bağlı)</button></div>
 
 <div class="liste-ust"><span id="sayac">İndirilenler (0)</span><span>Resim boyutu <input type="range" id="boyut" min="28" max="150" value="60"></span></div>
 <div id="liste"></div>
@@ -133,6 +134,7 @@ async function yenile(){
     $("klasor").textContent = "Kaydedilen yer: " + d.klasor + (d.kod ? "  •  sürüm " + d.kod : "");
     $("mesaj").textContent = d.mesaj + (d.sirada ? "  (sırada " + d.sirada + " link daha var)" : "");
     $("izinkutu").style.display = d.izin_gerek ? "flex" : "none";
+    $("tani").textContent = (d.tani && d.tani.length) ? "Sorun bilgisi: " + d.tani.join("  |  ") : "";
     $("indir").disabled = !d.hazir;
     $("durdur").disabled = !d.calisiyor;
     $("sayac").textContent = "İndirilenler (" + d.liste.length + ")";
@@ -157,7 +159,13 @@ async function indir(){
 }
 
 $("indir").onclick = indir;
-$("izin").onclick = async () => { try { await api("/api/izin", {}); } catch (e) {} };
+$("izin").onclick = async () => {
+  $("mesaj").textContent = "Ayar ekranı açılıyor...";
+  try {
+    const r = await api("/api/izin", {});
+    $("mesaj").textContent = r.ok ? "Ayar ekranı açıldı. İzni aç ve geri dön." : "Ayar ekranı açılamadı (ayrıntı aşağıdaki 'Sorun bilgisi' satırında).";
+  } catch (e) { $("mesaj").textContent = "İstek gönderilemedi: " + e; }
+};
 $("durdur").onclick = async () => { try { await api("/api/durdur", {}); } catch (e) {} yenile(); };
 $("giris").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); indir(); } });
 $("pintamam").onclick = () => {

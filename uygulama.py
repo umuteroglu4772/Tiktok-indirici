@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-KOD_SURUMU = "1.3"   # kod her güncellendiğinde değişir (uygulamanın üstünde görünür)
+KOD_SURUMU = "1.5"   # kod her güncellendiğinde değişir (uygulamanın üstünde görünür)
 PORT = 8765
 ANDROID = "ANDROID_ARGUMENT" in os.environ                 # Android'de miyiz?
 GUNCELLE = os.environ.get("TT_GUNCELLE", "1") != "0"        # açılışta yt-dlp'yi güncelle
@@ -85,38 +85,99 @@ def ssl_baglami():
 
 # ---------------- Depolama ve izin ----------------
 
-IZIN = {"gerek": False, "acildi": False}   # galeriye yazmak için özel izin gerekiyor mu?
+IZIN = {"gerek": False}   # True: video galeriye kopyalanamadı, uygulamanın kendi klasöründe kaldı
+TANI = []                 # ekranın altında "Sorun bilgisi" olarak gösterilir (hata ayıklama için)
+
+
+def tani(yer, e):
+    m = yer + ": " + type(e).__name__ + ": " + str(e)[:140]
+    if m not in TANI:
+        TANI.append(m)
+        del TANI[:-6]
+
+
+ETKINLIK = {"a": None}
+ONYUKLE = ["org.kivy.android.PythonActivity", "android.content.Intent", "android.provider.Settings", "android.net.Uri",
+           "android.os.Environment", "android.media.MediaScannerConnection", "android.content.ContentValues",
+           "android.provider.MediaStore$MediaColumns", "android.provider.MediaStore$Video$Media",
+           "java.io.FileInputStream", "android.os.FileUtils", "android.os.Build$VERSION", "android.content.Context",
+           "android.app.NotificationManager", "android.app.NotificationChannel", "android.app.Notification$Builder",
+           "android.app.PendingIntent"]
+
+
+def android_hazirla():
+    """Ana iş parçacığında çağrılır: Java sınıflarını önceden yükler.
+    (Python'un diğer iş parçacıkları uygulama sınıflarını kendi başına bulamayabilir; önbellekten kullanır.)"""
+    if not ANDROID:
+        return
+    try:
+        from jnius import autoclass
+    except Exception as e:
+        tani("jnius", e)
+        return
+    for ad in ONYUKLE:
+        try:
+            autoclass(ad)
+        except Exception as e:
+            tani("yukle " + ad.split(".")[-1], e)
+    try:
+        ETKINLIK["a"] = autoclass("org.kivy.android.PythonActivity").mActivity
+    except Exception as e:
+        tani("etkinlik", e)
+
+
+def aktivite():
+    """Uygulamanın Android etkinliği (Activity)."""
+    if ETKINLIK["a"] is not None:
+        return ETKINLIK["a"]
+    from jnius import autoclass
+    try:
+        from android.config import ACTIVITY_CLASS_NAME
+    except Exception:
+        ACTIVITY_CLASS_NAME = "org.kivy.android.PythonActivity"
+    a = autoclass(ACTIVITY_CLASS_NAME).mActivity
+    if a is None:
+        try:
+            from android import mActivity as a2
+            a = a2
+        except Exception:
+            pass
+    if a is None:
+        raise RuntimeError("Activity bulunamadı")
+    return a
 
 
 def izin_iste():
-    """Normal izin pencereleri (depolama + bildirim)."""
+    """Normal izin pencereleri (bildirim + eski Android'ler için depolama)."""
     if not ANDROID:
         return
     try:
         from android.permissions import request_permissions, Permission
         request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE,
                              "android.permission.POST_NOTIFICATIONS"])
-    except Exception:
-        pass
+    except Exception as e:
+        tani("izin_iste", e)
 
 
 def tum_dosya_izni_iste():
-    """Android 11+: 'Tüm dosyalara erişim' ayar ekranını açar."""
+    """İsteğe bağlı: 'Tüm dosyalara erişim' ayar ekranını açar. Açabildiyse True döner."""
     if not ANDROID:
-        return
+        return False
     try:
         from jnius import autoclass
         niyet = autoclass("android.content.Intent")
         ayar = autoclass("android.provider.Settings")
         uri = autoclass("android.net.Uri")
-        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
+        etkinlik = aktivite()
         try:
             i = niyet(ayar.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri.parse("package:" + etkinlik.getPackageName()))
             etkinlik.startActivity(i)
         except Exception:
             etkinlik.startActivity(niyet(ayar.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        tani("tum_dosya_izni", e)
+        return False
 
 
 def yazilabilir(d):
@@ -135,30 +196,34 @@ def galeri_klasoru():
 
 
 def harici_klasor():
-    """İzin gerektirmeyen, uygulamaya ait klasör (galeri izni yoksa buraya kaydedilir)."""
+    """İzin gerektirmeyen, uygulamaya ait klasör (galeriye kopyalanmadan önce videolar buraya iner)."""
     try:
-        from jnius import autoclass
-        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
-        d = etkinlik.getExternalFilesDir(None)
+        d = aktivite().getExternalFilesDir(None)
         if d is not None:
             return Path(str(d.getAbsolutePath())) / "TikTok"
-    except Exception:
-        pass
+    except Exception as e:
+        tani("harici_klasor", e)
+    # jnius çalışmadıysa yolu elle kur: <depolama>/Android/data/<paket>/files
+    try:
+        parcalar = Path(os.environ.get("ANDROID_PRIVATE", "")).parts   # ('/', 'data', 'user', '0', '<paket>', 'files')
+        paket = parcalar[4]
+        d = Path(os.environ.get("EXTERNAL_STORAGE") or "/sdcard") / "Android" / "data" / paket / "files" / "TikTok"
+        if yazilabilir(d):
+            return d
+    except Exception as e:
+        tani("harici_yol", e)
     return Path(os.environ.get("ANDROID_PRIVATE", ".")) / "TikTok"
 
 
 def klasor_bul():
-    """Videoların kaydedileceği klasör. Telefonda: Movies/TikTok (galeride görünür)."""
+    """Videoların ineceği klasör. Galeri klasörüne doğrudan yazılabiliyorsa orası, değilse uygulamanın kendi klasörü."""
     if not ANDROID:
         d = Path.home() / "Downloads" / "TikTok"
         d.mkdir(parents=True, exist_ok=True)
         KLASOR_SON["yol"] = d
         return d
     d = galeri_klasoru()
-    if yazilabilir(d):
-        IZIN["gerek"] = False
-    else:
-        IZIN["gerek"] = True
+    if not yazilabilir(d):
         d = harici_klasor()
         d.mkdir(parents=True, exist_ok=True)
     KLASOR_SON["yol"] = d
@@ -166,16 +231,51 @@ def klasor_bul():
 
 
 def medya_tara(yol):
-    """Videonun telefon galerisinde görünmesini sağlar."""
+    """Doğrudan galeri klasörüne inen videonun galeride görünmesini sağlar."""
     if not ANDROID:
         return
     try:
         from jnius import autoclass
-        tarayici = autoclass("android.media.MediaScannerConnection")
-        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
-        tarayici.scanFile(etkinlik, [yol], None, None)
-    except Exception:
-        pass
+        autoclass("android.media.MediaScannerConnection").scanFile(aktivite(), [yol], None, None)
+    except Exception as e:
+        tani("medya_tara", e)
+
+
+def galeriye_kopyala(yol):
+    """Videoyu izin istemeden Movies/TikTok'a kopyalar (MediaStore, Android 10+). Başarılıysa True."""
+    try:
+        import mimetypes as mt
+        from jnius import autoclass
+        etkinlik = aktivite()
+        cozucu = etkinlik.getContentResolver()
+        deger = autoclass("android.content.ContentValues")()
+        kolon = autoclass("android.provider.MediaStore$MediaColumns")
+        deger.put(kolon.DISPLAY_NAME, os.path.basename(yol))
+        deger.put(kolon.MIME_TYPE, mt.guess_type(yol)[0] or "video/mp4")
+        deger.put(kolon.RELATIVE_PATH, "Movies/TikTok")
+        uri = cozucu.insert(autoclass("android.provider.MediaStore$Video$Media").EXTERNAL_CONTENT_URI, deger)
+        if uri is None:
+            raise RuntimeError("MediaStore kaydı açılamadı")
+        cikis = cozucu.openOutputStream(uri)
+        giris = autoclass("java.io.FileInputStream")(yol)
+        try:
+            try:
+                autoclass("android.os.FileUtils").copy(giris, cikis)
+            except Exception as e1:
+                tani("FileUtils", e1)
+                with open(yol, "rb") as f:          # elle kopyala
+                    while True:
+                        parca = f.read(262144)
+                        if not parca:
+                            break
+                        cikis.write(parca, 0, len(parca))
+        finally:
+            giris.close()
+            cikis.close()
+        return True
+    except Exception as e:
+        tani("galeriye_kopyala", e)
+        return False
 
 
 def bildirim_gonder(baslik, metin):
@@ -184,7 +284,7 @@ def bildirim_gonder(baslik, metin):
         return
     try:
         from jnius import autoclass, cast
-        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
+        etkinlik = aktivite()
         surum = autoclass("android.os.Build$VERSION").SDK_INT
         baglam = autoclass("android.content.Context")
         yonetici = cast("android.app.NotificationManager", etkinlik.getSystemService(baglam.NOTIFICATION_SERVICE))
@@ -205,8 +305,8 @@ def bildirim_gonder(baslik, metin):
         bayrak = bekleyen.FLAG_UPDATE_CURRENT | (bekleyen.FLAG_IMMUTABLE if surum >= 23 else 0)
         b.setContentIntent(bekleyen.getActivity(etkinlik, 0, niyet, bayrak))
         yonetici.notify(int(time.time() * 1000) % 1000000, b.build())
-    except Exception:
-        pass
+    except Exception as e:
+        tani("bildirim", e)
 
 
 # ---------------- yt-dlp'yi hazırla ve güncelle ----------------
@@ -320,7 +420,7 @@ def kapak_bul(video_yolu):
     return None
 
 
-def kayit_ekle(yol):
+def kayit_ekle(yol, kapak=None):
     with KILIT:
         if any(k["yol"] == yol for k in KAYITLAR):
             return
@@ -335,7 +435,7 @@ def kayit_ekle(yol):
         bilgi = (bilgi + "   •   " if bilgi else "") + mb_yaz(os.path.getsize(yol))
     except OSError:
         pass
-    kayit = {"id": secrets.token_hex(4), "yol": yol, "kapak": kapak_bul(yol), "baslik": baslik, "bilgi": bilgi}
+    kayit = {"id": secrets.token_hex(4), "yol": yol, "kapak": kapak or kapak_bul(yol), "baslik": baslik, "bilgi": bilgi}
     with KILIT:
         KAYITLAR.append(kayit)
 
@@ -397,16 +497,36 @@ def ilerleme(d):
 
 
 def bitti_kancasi(yol):
-    kayit_ekle(yol)
-    medya_tara(yol)
-    bildirim_gonder("İndirme tamamlandı ✔", os.path.basename(yol) + "  (" + str(Path(yol).parent.name) + ")")
+    kapak = kapak_bul(yol)
+    son_yol, konum = yol, str(Path(yol).parent)
+    if ANDROID:
+        if str(yol).startswith(str(galeri_klasoru())):      # doğrudan galeri klasörüne indi
+            medya_tara(yol)
+            IZIN["gerek"] = False
+            konum = "Movies/TikTok"
+        elif galeriye_kopyala(yol):                          # izinsiz yol: MediaStore ile galeriye kopyala
+            IZIN["gerek"] = False
+            konum = "Movies/TikTok"
+            genel = galeri_klasoru() / os.path.basename(yol)
+            try:                                              # galerideki kopya okunabiliyorsa içerideki kopyayı sil
+                with open(genel, "rb") as f:
+                    f.read(1)
+                os.remove(yol)
+                son_yol = str(genel)
+            except Exception:
+                pass
+        else:
+            IZIN["gerek"] = True
+            konum = "galeriye kopyalanamadı, uygulama klasöründe"
+    kayit_ekle(son_yol, kapak)
+    bildirim_gonder("İndirme tamamlandı ✔", os.path.basename(yol) + "  →  " + konum)
     try:
-        boyut = os.path.getsize(yol)
+        boyut = os.path.getsize(son_yol)
         bilgi = mb_yaz(boyut) + " / " + mb_yaz(boyut)
     except OSError:
         bilgi = ""
     with KILIT:
-        DURUM.update(yuzde=100.0, bilgi=bilgi, dosya="Tamamlandı: " + os.path.basename(yol))
+        DURUM.update(yuzde=100.0, bilgi=bilgi, dosya="Tamamlandı: " + os.path.basename(yol) + "  (" + konum + ")")
 
 
 def indir(tur, parcalar):
@@ -415,23 +535,6 @@ def indir(tur, parcalar):
         with KILIT:
             DURUM.update(dosya="Hata", mesaj="yt-dlp yüklenemedi, uygulamayı kapatıp yeniden aç.")
         return
-    if ANDROID and not yazilabilir(galeri_klasoru()):
-        izin_iste()
-        for _ in range(10):
-            if yazilabilir(galeri_klasoru()):
-                break
-            time.sleep(0.5)
-        if not yazilabilir(galeri_klasoru()):
-            with KILIT:
-                DURUM.update(dosya="İzin bekleniyor...",
-                             mesaj="Açılan ekranda 'Tüm dosyalara erişime izin ver' seçeneğini aç ve geri dön.")
-            if not IZIN["acildi"]:
-                IZIN["acildi"] = True
-                tum_dosya_izni_iste()
-            for _ in range(120):   # en çok 60 saniye bekle
-                if yazilabilir(galeri_klasoru()):
-                    break
-                time.sleep(0.5)
     kok = klasor_bul()
     if tur == "link":
         hedef, linkler = kok, parcalar
@@ -609,10 +712,14 @@ class Isleyici(BaseHTTPRequestHandler):
                               for k in KAYITLAR]
             d["sirada"] = KUYRUK.qsize()
             d["hazir"] = HAZIR.is_set()
-            d["klasor"] = str(KLASOR_SON["yol"] or klasor_bul())
+            if ANDROID and not IZIN["gerek"]:
+                d["klasor"] = "Movies/TikTok (galeri)"
+            else:
+                d["klasor"] = str(KLASOR_SON["yol"] or klasor_bul())
             d["yerel"] = True
             d["kod"] = KOD_SURUMU
             d["izin_gerek"] = bool(IZIN["gerek"]) and ANDROID
+            d["tani"] = list(TANI)
             return self._json(d)
         if yol.startswith("/kapak/"):
             k = kayit_bul(yol[7:])
@@ -648,8 +755,11 @@ class Isleyici(BaseHTTPRequestHandler):
             KUYRUK.put((tur, parcalar))
             return self._json({"ok": True})
         if u.path == "/api/izin":
-            threading.Thread(target=tum_dosya_izni_iste, daemon=True).start()
-            return self._json({"ok": True})
+            ok = tum_dosya_izni_iste()
+            if not ok:
+                with KILIT:
+                    DURUM["mesaj"] = "İzin ekranı açılamadı."
+            return self._json({"ok": ok})
         if u.path == "/api/durdur":
             durdur()
             return self._json({"ok": True})
@@ -670,8 +780,9 @@ def main():
     sunucu.daemon_threads = True
     threading.Thread(target=hazirla, daemon=True).start()
     threading.Thread(target=isci, daemon=True).start()
+    android_hazirla()   # Java sınıflarını ana iş parçacığında yükle
     if ANDROID:
-        threading.Timer(2.0, izin_iste).start()
+        izin_iste()
     sunucu.serve_forever()
 
 
