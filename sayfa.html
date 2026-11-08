@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>TikTok İndirici</title>
+<style>
+:root{--bg:#0f1115;--pn:#1a1d24;--pn2:#262b35;--fg:#e8eaed;--soluk:#8b93a1;--ac:#25c2a0;--ac2:#3ddcb8;--koyu:#08130f}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,"Segoe UI",Roboto,sans-serif;
+padding:max(16px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.alt{color:var(--soluk);font-size:12px;word-break:break-all}
+label{display:block;color:var(--soluk);font-size:13px;margin:16px 0 6px}
+input[type=text]{width:100%;background:var(--pn);color:var(--fg);border:2px solid transparent;border-radius:10px;padding:14px;font-size:16px;outline:none}
+input[type=text]:focus{border-color:var(--ac)}
+.satir{display:flex;gap:10px;margin-top:12px}
+button{font:inherit;border:0;border-radius:10px;padding:14px 18px;background:var(--pn);color:var(--fg);cursor:pointer}
+button:active{background:var(--pn2)}
+button:disabled{opacity:.4}
+.ana{background:var(--ac);color:var(--koyu);font-weight:700;font-size:17px;flex:1.6}
+.ana:active{background:var(--ac2)}
+.satir button{flex:1}
+.yuzde{display:flex;align-items:flex-end;justify-content:space-between;margin-top:18px;gap:10px}
+#yuzde{font-size:40px;font-weight:700;color:var(--ac);line-height:1}
+#bilgi{color:var(--soluk);font-size:13px;text-align:right}
+.cubukkap{height:12px;background:var(--pn);border-radius:6px;margin:10px 0;overflow:hidden}
+#cubuk{height:100%;width:0;background:var(--ac);transition:width .3s}
+#dosya{word-break:break-word}
+#mesaj{color:var(--soluk);font-size:13px;word-break:break-word;min-height:18px}
+.liste-ust{display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px;color:var(--soluk);font-size:13px;gap:10px}
+input[type=range]{accent-color:var(--ac);width:120px;vertical-align:middle}
+.kart{display:flex;gap:10px;align-items:center;background:var(--pn);border-radius:12px;padding:8px;margin-bottom:8px}
+.sira{width:22px;text-align:center;color:var(--soluk);font-weight:700;font-size:13px;flex:none}
+.kapak{flex:none;border-radius:8px;overflow:hidden;background:var(--pn2);display:flex;align-items:center;justify-content:center;color:var(--soluk);cursor:pointer}
+.kapak img{width:100%;height:100%;object-fit:cover;display:block}
+.metin{min-width:0;flex:1}
+.baslik{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbilgi{color:var(--soluk);font-size:13px}
+.islem{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.islem button,.islem a{padding:9px 14px;font-size:14px;border-radius:8px;background:var(--pn2);color:var(--fg);text-decoration:none;border:0}
+.oyn{position:fixed;inset:0;background:#000;display:none;flex-direction:column;z-index:20}
+.oyn video{flex:1;width:100%;min-height:0;background:#000}
+.oyn button{margin:10px;align-self:flex-end}
+.pin{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+.pin>div{background:var(--pn);padding:20px;border-radius:14px;width:100%;max-width:340px}
+.pin p{margin:0 0 12px}
+</style></head><body>
+<h1>TikTok İndirici</h1>
+<div class="alt" id="klasor"></div>
+
+<label for="giris">Link veya kullanıcı adı (birden fazla link için aralarına boşluk bırak)</label>
+<input type="text" id="giris" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url" enterkeyhint="go" placeholder="https://www.tiktok.com/...">
+<div class="satir"><button class="ana" id="indir" disabled>İndir</button><button id="durdur" disabled>Durdur</button></div>
+
+<div class="yuzde"><div id="yuzde">%0</div><div id="bilgi"></div></div>
+<div class="cubukkap"><div id="cubuk"></div></div>
+<div id="dosya"></div>
+<div id="mesaj"></div>
+
+<div class="liste-ust"><span id="sayac">İndirilenler (0)</span><span>Resim boyutu <input type="range" id="boyut" min="28" max="150" value="60"></span></div>
+<div id="liste"></div>
+
+<div class="oyn" id="oyn"><button id="oynkapat">✕ Kapat</button><video id="oynat" controls playsinline></video></div>
+
+<div class="pin" id="pin"><div>
+<p>Bilgisayardaki ekranda yazan kodu gir:</p>
+<input type="text" id="pinkutu" inputmode="numeric" autocomplete="off">
+<div class="satir"><button class="ana" id="pintamam">Tamam</button></div>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const depo = { al: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, koy: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+let PIN = depo.al("pin") || "";
+let liste = [], imza = "", YEREL = false;
+
+function pinSor(){ $("pin").style.display = "flex"; }
+
+async function api(yol, govde){
+  const o = {headers: {"X-Pin": PIN}};
+  if (govde !== undefined){
+    o.method = "POST";
+    o.headers["Content-Type"] = "application/json";
+    o.body = JSON.stringify(govde);
+  }
+  const r = await fetch(yol, o);
+  if (r.status === 403){ pinSor(); throw new Error("pin"); }
+  return r.json();
+}
+
+function ciz(){
+  const gen = +$("boyut").value, yuk = Math.round(gen * 16 / 9);
+  const p = encodeURIComponent(PIN);
+  $("liste").innerHTML = liste.map((v, i) => {
+    const kap = v.kapak ? `<img src="/kapak/${v.id}?p=${p}" onerror="this.parentNode.textContent='▶'">` : "▶";
+    return `<div class="kart">
+      <div class="sira">${i + 1}</div>
+      <div class="kapak" data-act="izle" data-id="${v.id}" style="width:${gen}px;height:${yuk}px">${kap}</div>
+      <div class="metin">
+        <div class="baslik">${esc(v.baslik)}</div>
+        <div class="kbilgi">${esc(v.bilgi)}</div>
+        <div class="islem">
+          <button data-act="tasi" data-yon="-1" data-id="${v.id}" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button data-act="tasi" data-yon="1" data-id="${v.id}" ${i === liste.length - 1 ? "disabled" : ""}>▼</button>
+          ${YEREL ? "" : `<a href="/dosya/${v.id}?p=${p}" download>Kaydet</a>`}
+        </div>
+      </div></div>`;
+  }).join("");
+}
+
+async function yenile(){
+  try {
+    const d = await api("/api/durum");
+    $("pin").style.display = "none";
+    YEREL = !!d.yerel;
+    $("yuzde").textContent = "%" + Math.floor(d.yuzde);
+    $("cubuk").style.width = d.yuzde + "%";
+    $("bilgi").textContent = d.bilgi;
+    $("dosya").textContent = d.dosya;
+    $("klasor").textContent = "Kaydedilen yer: " + d.klasor;
+    $("mesaj").textContent = d.mesaj + (d.sirada ? "  (sırada " + d.sirada + " link daha var)" : "");
+    $("indir").disabled = !d.hazir;
+    $("durdur").disabled = !d.calisiyor;
+    $("sayac").textContent = "İndirilenler (" + d.liste.length + ")";
+    const yeni = d.liste.map(k => k.id).join(",");
+    if (yeni !== imza){ imza = yeni; liste = d.liste; ciz(); }
+  } catch (e) {}
+}
+
+async function indir(){
+  const m = $("giris").value.trim();
+  if (!m){ $("mesaj").textContent = "Önce bir link veya kullanıcı adı yaz."; return; }
+  try {
+    const d = await api("/api/indir", {girdi: m});
+    if (d.ok){ $("giris").value = ""; $("mesaj").textContent = ""; }
+    else { $("mesaj").textContent = d.hata; }
+  } catch (e) {}
+  yenile();
+}
+
+$("indir").onclick = indir;
+$("durdur").onclick = async () => { try { await api("/api/durdur", {}); } catch (e) {} yenile(); };
+$("giris").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); indir(); } });
+$("pintamam").onclick = () => {
+  PIN = $("pinkutu").value.trim();
+  depo.koy("pin", PIN);
+  imza = "";
+  yenile();
+};
+$("boyut").value = depo.al("boyut") || 60;
+$("boyut").oninput = () => { depo.koy("boyut", $("boyut").value); ciz(); };
+$("liste").addEventListener("click", async e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  if (t.dataset.act === "izle"){
+    const v = $("oynat");
+    v.src = "/dosya/" + t.dataset.id + "?izle=1&p=" + encodeURIComponent(PIN);
+    $("oyn").style.display = "flex";
+    v.play().catch(() => {});
+  } else if (t.dataset.act === "tasi"){
+    try { await api("/api/tasi", {id: t.dataset.id, yon: +t.dataset.yon}); } catch (e) {}
+    imza = "";
+    yenile();
+  }
+});
+
+$("oynkapat").onclick = () => {
+  const v = $("oynat");
+  v.pause(); v.removeAttribute("src"); v.load();
+  $("oyn").style.display = "none";
+};
+
+setInterval(yenile, 1000);
+yenile();
+</script></body></html>
