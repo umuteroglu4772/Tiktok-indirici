@@ -38,6 +38,7 @@ input[type=range]{accent-color:var(--ac);width:120px;vertical-align:middle}
 .kbilgi{color:var(--soluk);font-size:13px}
 .islem{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .islem button,.islem a{padding:9px 14px;font-size:14px;border-radius:8px;background:var(--pn2);color:var(--fg);text-decoration:none;border:0}
+#duyuru{position:fixed;left:12px;right:12px;top:max(12px,env(safe-area-inset-top));background:var(--ac);color:var(--koyu);padding:14px 16px;border-radius:12px;font-weight:700;display:none;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,.5);word-break:break-word}
 .oyn{position:fixed;inset:0;background:#000;display:none;flex-direction:column;z-index:20}
 .oyn video{flex:1;width:100%;min-height:0;background:#000}
 .oyn button{margin:10px;align-self:flex-end}
@@ -60,6 +61,7 @@ input[type=range]{accent-color:var(--ac);width:120px;vertical-align:middle}
 <div class="liste-ust"><span id="sayac">İndirilenler (0)</span><span>Resim boyutu <input type="range" id="boyut" min="28" max="150" value="60"></span></div>
 <div id="liste"></div>
 
+<div id="duyuru"></div>
 <div class="oyn" id="oyn"><button id="oynkapat">✕ Kapat</button><video id="oynat" controls playsinline></video></div>
 
 <div class="pin" id="pin"><div>
@@ -74,6 +76,15 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">"
 const depo = { al: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, koy: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
 let PIN = depo.al("pin") || "";
 let liste = [], imza = "", YEREL = false;
+let bilinen = null, duyuZaman = null;
+function duyur(m){
+  const b = $("duyuru");
+  b.textContent = m;
+  b.style.display = "block";
+  try { if (navigator.vibrate) navigator.vibrate(250); } catch (e) {}
+  clearTimeout(duyuZaman);
+  duyuZaman = setTimeout(() => { b.style.display = "none"; }, 6000);
+}
 
 function pinSor(){ $("pin").style.display = "flex"; }
 
@@ -118,11 +129,15 @@ async function yenile(){
     $("cubuk").style.width = d.yuzde + "%";
     $("bilgi").textContent = d.bilgi;
     $("dosya").textContent = d.dosya;
-    $("klasor").textContent = "Kaydedilen yer: " + d.klasor;
+    $("klasor").textContent = "Kaydedilen yer: " + d.klasor + (d.kod ? "  •  sürüm " + d.kod : "");
     $("mesaj").textContent = d.mesaj + (d.sirada ? "  (sırada " + d.sirada + " link daha var)" : "");
     $("indir").disabled = !d.hazir;
     $("durdur").disabled = !d.calisiyor;
     $("sayac").textContent = "İndirilenler (" + d.liste.length + ")";
+    if (bilinen !== null){
+      d.liste.filter(k => !bilinen.has(k.id)).forEach(k => duyur("✔ İndirildi: " + k.baslik + "  →  " + d.klasor));
+    }
+    bilinen = new Set(d.liste.map(k => k.id));
     const yeni = d.liste.map(k => k.id).join(",");
     if (yeni !== imza){ imza = yeni; liste = d.liste; ciz(); }
   } catch (e) {}
