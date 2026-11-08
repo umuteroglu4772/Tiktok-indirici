@@ -57,6 +57,7 @@ input[type=range]{accent-color:var(--ac);width:120px;vertical-align:middle}
 <div class="cubukkap"><div id="cubuk"></div></div>
 <div id="dosya"></div>
 <div id="mesaj"></div>
+<div class="satir" id="izinkutu" style="display:none"><button class="ana" id="izin" style="flex:1">Depolama iznini ver</button></div>
 
 <div class="liste-ust"><span id="sayac">İndirilenler (0)</span><span>Resim boyutu <input type="range" id="boyut" min="28" max="150" value="60"></span></div>
 <div id="liste"></div>
@@ -131,6 +132,7 @@ async function yenile(){
     $("dosya").textContent = d.dosya;
     $("klasor").textContent = "Kaydedilen yer: " + d.klasor + (d.kod ? "  •  sürüm " + d.kod : "");
     $("mesaj").textContent = d.mesaj + (d.sirada ? "  (sırada " + d.sirada + " link daha var)" : "");
+    $("izinkutu").style.display = d.izin_gerek ? "flex" : "none";
     $("indir").disabled = !d.hazir;
     $("durdur").disabled = !d.calisiyor;
     $("sayac").textContent = "İndirilenler (" + d.liste.length + ")";
@@ -155,6 +157,7 @@ async function indir(){
 }
 
 $("indir").onclick = indir;
+$("izin").onclick = async () => { try { await api("/api/izin", {}); } catch (e) {} };
 $("durdur").onclick = async () => { try { await api("/api/durdur", {}); } catch (e) {} yenile(); };
 $("giris").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); indir(); } });
 $("pintamam").onclick = () => {

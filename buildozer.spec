@@ -5,7 +5,7 @@ package.domain = org.indirici
 source.dir = .
 source.include_exts = py,html,png
 source.exclude_dirs = .github,bin,.buildozer
-version = 1.0
+version = 1.1
 icon.filename = %(source.dir)s/icon.png
 
 # yt-dlp saf Python oldugu icin ayrica bir sey gerekmez.
@@ -18,10 +18,12 @@ fullscreen = 0
 p4a.bootstrap = webview
 p4a.port = 8765
 
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-# Hedef surum 27: videolari Movies/TikTok klasorune dogrudan yazabilmek ve
-# yerel sunucuya (http://127.0.0.1) ek ayar olmadan baglanabilmek icin.
-android.api = 27
+# MANAGE_EXTERNAL_STORAGE: videolari Movies/TikTok klasorune kaydedebilmek icin
+# POST_NOTIFICATIONS: "indirme bitti" bildirimi icin
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,POST_NOTIFICATIONS
+# Hedef surum yeterince yeni olmali (Play Protect "eski surum" uyarisi vermesin).
+# Derleme akisi bu degeri 34 ve 33 olarak iki kez dener.
+android.api = 34
 android.minapi = 21
 android.ndk = 25b
 android.ndk_api = 21

@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-KOD_SURUMU = "1.2"   # kod her güncellendiğinde değişir (uygulamanın üstünde görünür)
+KOD_SURUMU = "1.3"   # kod her güncellendiğinde değişir (uygulamanın üstünde görünür)
 PORT = 8765
 ANDROID = "ANDROID_ARGUMENT" in os.environ                 # Android'de miyiz?
 GUNCELLE = os.environ.get("TT_GUNCELLE", "1") != "0"        # açılışta yt-dlp'yi güncelle
@@ -85,24 +85,66 @@ def ssl_baglami():
 
 # ---------------- Depolama ve izin ----------------
 
-def izin_var():
-    if not ANDROID:
-        return True
-    try:
-        from android.permissions import check_permission, Permission
-        return bool(check_permission(Permission.WRITE_EXTERNAL_STORAGE))
-    except Exception:
-        return True  # kontrol edilemiyorsa klasör yazma testi zaten yapılıyor
+IZIN = {"gerek": False, "acildi": False}   # galeriye yazmak için özel izin gerekiyor mu?
 
 
 def izin_iste():
+    """Normal izin pencereleri (depolama + bildirim)."""
     if not ANDROID:
         return
     try:
         from android.permissions import request_permissions, Permission
-        request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
+        request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE,
+                             "android.permission.POST_NOTIFICATIONS"])
     except Exception:
         pass
+
+
+def tum_dosya_izni_iste():
+    """Android 11+: 'Tüm dosyalara erişim' ayar ekranını açar."""
+    if not ANDROID:
+        return
+    try:
+        from jnius import autoclass
+        niyet = autoclass("android.content.Intent")
+        ayar = autoclass("android.provider.Settings")
+        uri = autoclass("android.net.Uri")
+        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
+        try:
+            i = niyet(ayar.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri.parse("package:" + etkinlik.getPackageName()))
+            etkinlik.startActivity(i)
+        except Exception:
+            etkinlik.startActivity(niyet(ayar.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+    except Exception:
+        pass
+
+
+def yazilabilir(d):
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        t = d / ".yazma_testi"
+        t.write_text("1")
+        t.unlink()
+        return True
+    except Exception:
+        return False
+
+
+def galeri_klasoru():
+    return Path(os.environ.get("EXTERNAL_STORAGE") or "/sdcard") / "Movies" / "TikTok"
+
+
+def harici_klasor():
+    """İzin gerektirmeyen, uygulamaya ait klasör (galeri izni yoksa buraya kaydedilir)."""
+    try:
+        from jnius import autoclass
+        etkinlik = autoclass("org.kivy.android.PythonActivity").mActivity
+        d = etkinlik.getExternalFilesDir(None)
+        if d is not None:
+            return Path(str(d.getAbsolutePath())) / "TikTok"
+    except Exception:
+        pass
+    return Path(os.environ.get("ANDROID_PRIVATE", ".")) / "TikTok"
 
 
 def klasor_bul():
@@ -112,14 +154,12 @@ def klasor_bul():
         d.mkdir(parents=True, exist_ok=True)
         KLASOR_SON["yol"] = d
         return d
-    d = Path(os.environ.get("EXTERNAL_STORAGE") or "/sdcard") / "Movies" / "TikTok"
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        t = d / ".yazma_testi"
-        t.write_text("1")
-        t.unlink()
-    except Exception:
-        d = Path(os.environ.get("ANDROID_PRIVATE", ".")) / "TikTok"  # izin yoksa uygulamanın kendi alanı
+    d = galeri_klasoru()
+    if yazilabilir(d):
+        IZIN["gerek"] = False
+    else:
+        IZIN["gerek"] = True
+        d = harici_klasor()
         d.mkdir(parents=True, exist_ok=True)
     KLASOR_SON["yol"] = d
     return d
@@ -171,40 +211,69 @@ def bildirim_gonder(baslik, metin):
 
 # ---------------- yt-dlp'yi hazırla ve güncelle ----------------
 
+def son_surum_etiketi(ctx):
+    """yt-dlp'nin en yeni sürüm numarasını bulur (önce github.com yönlendirmesi, olmazsa API)."""
+    for _ in range(2):
+        try:
+            istek = urllib.request.Request("https://github.com/yt-dlp/yt-dlp/releases/latest", headers=UA, method="HEAD")
+            with urllib.request.urlopen(istek, timeout=12, context=ctx) as r:
+                son = r.geturl().rstrip("/").split("/")[-1]
+            if re.match(r"^\d[\d.]*\d$", son):
+                return son
+        except Exception:
+            pass
+        try:
+            istek = urllib.request.Request("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", headers=UA)
+            with urllib.request.urlopen(istek, timeout=12, context=ctx) as r:
+                return json.load(r)["tag_name"]
+        except Exception:
+            time.sleep(2)
+    raise ValueError("GitHub yanıt vermedi")
+
+
 def yt_dlp_guncelle_indir():
-    """GitHub'daki en yeni yt-dlp'yi indirir (uygulamanın kendi klasörüne). Hata olursa metin döner."""
+    """GitHub'daki en yeni yt-dlp'yi indirir (uygulamanın kendi klasörüne). Hata olursa kısa metin döner."""
     sd = veri_klasoru()
     zipapp, etiket = sd / "yt-dlp-guncel", sd / "yt-dlp-guncel.etiket"
     try:
         ctx = ssl_baglami()
-        istek = urllib.request.Request("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", headers=UA)
-        with urllib.request.urlopen(istek, timeout=15, context=ctx) as r:
-            tag = json.load(r)["tag_name"]
+        tag = son_surum_etiketi(ctx)
         eski = etiket.read_text().strip() if etiket.exists() else ""
         if tag != eski or not zipapp.exists():
             url = "https://github.com/yt-dlp/yt-dlp/releases/download/%s/yt-dlp" % tag
             gecici = sd / "yt-dlp-gecici"
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60, context=ctx) as r, \
-                    open(gecici, "wb") as f:
-                while True:
-                    parca = r.read(65536)
-                    if not parca:
-                        break
-                    f.write(parca)
+            for deneme in range(3):
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=40, context=ctx) as r, \
+                            open(gecici, "wb") as f:
+                        while True:
+                            parca = r.read(65536)
+                            if not parca:
+                                break
+                            f.write(parca)
+                    break
+                except Exception:
+                    if deneme == 2:
+                        raise
+                    time.sleep(3)
             if not (zipfile.is_zipfile(gecici) and gecici.stat().st_size > 500000):
                 raise ValueError("indirilen dosya bozuk")
             os.replace(gecici, zipapp)
             etiket.write_text(tag)
         return ""
     except Exception as e:
-        return "güncellenemedi: " + str(e)[:60]
+        return "güncelleme alınamadı, bir sonraki açılışta tekrar denenecek"
 
 
 def yt_dlp_yukle():
     """yt-dlp'yi içe aktarır. (sürüm, uyarı) döner."""
     uyari = ""
     if GUNCELLE:
-        uyari = yt_dlp_guncelle_indir()
+        sonuc = {"u": ""}
+        is_parcacigi = threading.Thread(target=lambda: sonuc.update(u=yt_dlp_guncelle_indir()), daemon=True)
+        is_parcacigi.start()
+        is_parcacigi.join(timeout=15)   # 15 sn'de bitmezse içindeki/önceki sürümle devam, indirme arka planda sürer
+        uyari = sonuc["u"]
     zipapp = veri_klasoru() / "yt-dlp-guncel"
     if zipapp.exists() and "yt_dlp" not in sys.modules:
         sys.path.insert(0, str(zipapp))
@@ -346,14 +415,23 @@ def indir(tur, parcalar):
         with KILIT:
             DURUM.update(dosya="Hata", mesaj="yt-dlp yüklenemedi, uygulamayı kapatıp yeniden aç.")
         return
-    if ANDROID and not izin_var():
+    if ANDROID and not yazilabilir(galeri_klasoru()):
         izin_iste()
-        with KILIT:
-            DURUM["dosya"] = "Depolama izni bekleniyor (açılan pencerede İzin ver'e dokun)..."
-        for _ in range(60):
-            if izin_var():
+        for _ in range(10):
+            if yazilabilir(galeri_klasoru()):
                 break
             time.sleep(0.5)
+        if not yazilabilir(galeri_klasoru()):
+            with KILIT:
+                DURUM.update(dosya="İzin bekleniyor...",
+                             mesaj="Açılan ekranda 'Tüm dosyalara erişime izin ver' seçeneğini aç ve geri dön.")
+            if not IZIN["acildi"]:
+                IZIN["acildi"] = True
+                tum_dosya_izni_iste()
+            for _ in range(120):   # en çok 60 saniye bekle
+                if yazilabilir(galeri_klasoru()):
+                    break
+                time.sleep(0.5)
     kok = klasor_bul()
     if tur == "link":
         hedef, linkler = kok, parcalar
@@ -534,6 +612,7 @@ class Isleyici(BaseHTTPRequestHandler):
             d["klasor"] = str(KLASOR_SON["yol"] or klasor_bul())
             d["yerel"] = True
             d["kod"] = KOD_SURUMU
+            d["izin_gerek"] = bool(IZIN["gerek"]) and ANDROID
             return self._json(d)
         if yol.startswith("/kapak/"):
             k = kayit_bul(yol[7:])
@@ -567,6 +646,9 @@ class Isleyici(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._json({"ok": False, "hata": str(e)})
             KUYRUK.put((tur, parcalar))
+            return self._json({"ok": True})
+        if u.path == "/api/izin":
+            threading.Thread(target=tum_dosya_izni_iste, daemon=True).start()
             return self._json({"ok": True})
         if u.path == "/api/durdur":
             durdur()
